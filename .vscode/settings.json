@@ -1,6 +1,7 @@
 {
     "nrf-connect.applications": [
         "${workspaceFolder}\\central_uart",
-        "${workspaceFolder}\\peripheral_uart"
+        "${workspaceFolder}\\peripheral_uart",
+        "${workspaceFolder}\\thermometer"
     ]
 }

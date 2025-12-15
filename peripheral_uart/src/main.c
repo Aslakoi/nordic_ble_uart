@@ -27,6 +27,8 @@
 
 #include <dk_buttons_and_leds.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/i2c.h>
 
 #include <zephyr/settings/settings.h>
 
@@ -58,6 +60,30 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
 
 /* Track LED state for BLE transmission */
 static bool led_state = false;
+
+/* Temperature sensor device */
+static const struct device *temp_sensor;
+
+/* BME280 I2C device and registers */
+static struct i2c_dt_spec bme280_dev;
+#define BME280_CHIP_ID 0x60
+#define BME280_ID_REG 0xD0
+#define BME280_CTRLMEAS 0xF4
+#define BME280_TEMPMSB 0xFA
+#define BME280_PRESSMSB 0xF7
+#define BME280_HUMMSB 0xFD
+#define BME280_CALIB00 0x88
+#define BME280_CALIB_HUM 0xA1
+#define BME280_ADDR 0x77
+
+/* BME280 calibration data structure - temperature only */
+struct bme280_calib {
+	uint16_t dig_t1;
+	int16_t dig_t2;
+	int16_t dig_t3;
+};
+
+static struct bme280_calib bme280_calib_data;
 
 /* Button GPIO setup */
 #define SW0_NODE DT_ALIAS(sw0)
@@ -143,13 +169,112 @@ UART_ASYNC_ADAPTER_INST_DEFINE(async_adapter);
 #define async_adapter NULL
 #endif
 
+/* Temperature sensor reading function */
+static int read_temperature(struct sensor_value *val)
+{
+	int ret;
+
+	if (!temp_sensor) {
+		return -ENODEV;
+	}
+
+	ret = sensor_sample_fetch_chan(temp_sensor, SENSOR_CHAN_AMBIENT_TEMP);
+	if (ret < 0) {
+		LOG_ERR("Could not fetch temperature: %d", ret);
+		return ret;
+	}
+
+	ret = sensor_channel_get(temp_sensor, SENSOR_CHAN_AMBIENT_TEMP, val);
+	if (ret < 0) {
+		LOG_ERR("Could not get temperature: %d", ret);
+		return ret;
+	}
+	return ret;
+}
+
+/* Read BME280 calibration data - temperature only */
+static int bme280_read_calibration(void)
+{
+	uint8_t calib[6];
+	int ret;
+	
+	/* Read temperature calibration (6 bytes) - same as exercise */
+	ret = i2c_burst_read_dt(&bme280_dev, BME280_CALIB00, calib, 6);
+	if (ret != 0) {
+		printk("Failed to read calibration: %d\n", ret);
+		return ret;
+	}
+	
+	/* Temperature calibration (same as exercise) */
+	bme280_calib_data.dig_t1 = ((uint16_t)calib[1] << 8) | calib[0];
+	bme280_calib_data.dig_t2 = ((int16_t)calib[3] << 8) | calib[2];
+	bme280_calib_data.dig_t3 = ((int16_t)calib[5] << 8) | calib[4];
+	
+	printk("Calibration loaded\n");
+	
+	return 0;
+}
+
+/* Compensate temperature using calibration data (same as exercise) */
+static int32_t bme280_compensate_temp(int32_t adc_temp)
+{
+	int32_t var1, var2;
+
+	var1 = (((adc_temp >> 3) - ((int32_t)bme280_calib_data.dig_t1 << 1)) * 
+		((int32_t)bme280_calib_data.dig_t2)) >> 11;
+
+	var2 = (((((adc_temp >> 4) - ((int32_t)bme280_calib_data.dig_t1)) *
+		  ((adc_temp >> 4) - ((int32_t)bme280_calib_data.dig_t1))) >> 12) *
+		((int32_t)bme280_calib_data.dig_t3)) >> 14;
+
+	return ((var1 + var2) * 5 + 128) >> 8;
+}
+
+/* Read temperature from BME280 via I2C (same as exercise) */
+static float bme280_read_temperature(void)
+{
+	uint8_t temp_data[3] = {0};
+	int ret;
+
+	if (!device_is_ready(bme280_dev.bus)) {
+		return -999.0f;
+	}
+
+	/* Read 3 bytes starting from TEMPMSB register */
+	ret = i2c_burst_read_dt(&bme280_dev, BME280_TEMPMSB, temp_data, 3);
+	if (ret != 0) {
+		printk("Failed to read temperature\n");
+		return -999.0f;
+	}
+
+	/* Raw ADC value: MSB[7:0] | LSB[7:4] | XLSB[7:4] (same as exercise) */
+	int32_t adc_temp = (temp_data[0] << 12) | (temp_data[1] << 4) | ((temp_data[2] >> 4) & 0x0F);
+	
+	/* Compensate temperature using calibration data */
+	int32_t comp_temp = bme280_compensate_temp(adc_temp);
+	
+	/* Convert to temperature in Celsius (comp_temp is in 0.01°C units) */
+	float temperature = (float)comp_temp / 100.0f;
+	
+	return temperature;
+}
+
 static void periodic_send_work_handler(struct k_work *work)
 {
-	char msg[64];
+	char msg[128];
 	int len;
+	float temperature;
 
-	len = snprintf(msg, sizeof(msg), "Periodic - LED: %s\r\n",
-		       led_state ? "ON" : "OFF");
+	/* Read temperature from BME280 */
+	temperature = bme280_read_temperature();
+
+	if (temperature > -999.0f) {
+		len = snprintf(msg, sizeof(msg), "LED: %s, Temp: %.2f°C\r\n",
+			       led_state ? "ON" : "OFF", temperature);
+	} else {
+		len = snprintf(msg, sizeof(msg), "LED: %s, Temp: N/A\r\n",
+			       led_state ? "ON" : "OFF");
+	}
 
 	int err = bt_nus_send(NULL, (const uint8_t *)msg, len);
 	if (err) {
@@ -768,6 +893,42 @@ int main(void)
 	}
 
 	LOG_INF("LED2 initialized");
+
+	/* Initialize BME280 I2C sensor */
+	printk("Initializing BME280...\n");
+	
+	static const struct i2c_dt_spec bme280_spec = I2C_DT_SPEC_GET(DT_NODELABEL(bme280));
+	bme280_dev = bme280_spec;
+	
+	if (device_is_ready(bme280_dev.bus)) {
+		/* Verify BME280 chip ID */
+		uint8_t id = 0;
+		uint8_t id_reg = BME280_ID_REG;
+		int ret = i2c_write_read_dt(&bme280_dev, &id_reg, 1, &id, 1);
+		
+		if (ret == 0 && id == BME280_CHIP_ID) {
+			printk("BME280 detected (ID: 0x%02x)\n", id);
+			
+			/* Read calibration data */
+			ret = bme280_read_calibration();
+			if (ret != 0) {
+				printk("Failed to read calibration data\n");
+			}
+			
+			/* Configure sensor: 0x93 = normal mode, oversampling */
+			uint8_t config[] = {BME280_CTRLMEAS, 0x93};
+			ret = i2c_write_dt(&bme280_dev, config, 2);
+			if (ret == 0) {
+				printk("BME280 configured successfully\n");
+			} else {
+				printk("Failed to configure BME280: %d\n", ret);
+			}
+		} else {
+			printk("BME280 not detected (ID: 0x%02x, ret: %d)\n", id, ret);
+		}
+	} else {
+		printk("I2C bus is not ready!\n");
+	}
 
 	/* Initialize and start periodic timer */
 	k_work_init(&button_press_work, button_press_work_handler);

@@ -9,3 +9,33 @@
 		nordic,nus-uart = &uart20;
 	};
 };
+
+&i2c21 {
+	status = "okay";
+	pinctrl-0 = <&i2c21_default>;
+	pinctrl-1 = <&i2c21_sleep>;
+	pinctrl-names = "default", "sleep";
+	
+	bme280: bme280@77 {
+		compatible = "bosch,bme280";
+		status = "okay";
+		reg = <0x77>;
+	};
+};
+
+&pinctrl {
+	/omit-if-no-ref/ i2c21_default: i2c21_default {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SCL, 1, 11)>,
+				<NRF_PSEL(TWIM_SDA, 1, 12)>;
+		};
+	};
+	
+	/omit-if-no-ref/ i2c21_sleep: i2c21_sleep {
+		group1 {
+			psels = <NRF_PSEL(TWIM_SCL, 1, 11)>,
+				<NRF_PSEL(TWIM_SDA, 1, 12)>;
+			low-power-enable;
+		};
+	};
+};
