@@ -2,6 +2,8 @@
 
 A complete BLE-based environmental monitoring system using Nordic nRF54L15 DK boards with real-time web dashboard.
 
+**Based on:** [Nordic nRF Connect SDK Bluetooth Samples](https://github.com/nrfconnect/sdk-nrf/tree/main/samples/bluetooth) - specifically the `ble_app_uart` peripheral_uart and central_uart samples, extended with BME280 temperature sensing and a Python web dashboard.
+
 ## System Overview
 
 This project demonstrates:
