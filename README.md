@@ -14,26 +14,26 @@ This project demonstrates:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Your Computer (PC)                       │
+│                    Your Computer                            │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │  Python Logger (ble_logger.py)                         │ │
-│  │  - Reads serial data from Central board               │ │
-│  │  - Parses BLE messages                                │ │
-│  │  - Converts to JSON                                   │ │
-│  │  - Serves web dashboard on http://localhost:8000     │ │
+│  │  - Reads serial data from Central board                │ │
+│  │  - Parses BLE messages                                 │ │
+│  │  - Converts to JSON                                    │ │
+│  │  - Serves web dashboard on http://localhost:8000       │ |
 │  └────────────────────────────────────────────────────────┘ │
-└───────────────────┬──────────────────────────────────────────┘
+└───────────────────┬─────────────────────────────────────────┘
                     │ Serial (COM14)
-          ┌─────────┴──────────┐
-          │                    │
-  ┌───────▼───────┐  ┌────────▼────────┐
-  │  Peripheral   │  │    Central      │
-  │  Board #1     │  │    Board #2     │
-  │ ─────────────│  │ ─────────────── │
-  │ • BME280 I2C │  │ • BLE Receiver  │
-  │ • Reads Temp │  │ • Serial Output │
-  │ • BLE TX     │◄─┤ • BLE RX        │
-  └───────────────┘  └─────────────────┘
+                    ┴──────────┐
+                               │
+  ┌───────▼───────┐    ┌────────▼────────┐
+  │  Peripheral   │    │    Central      │
+  │  Board #1     │    │    Board #2     │
+  │ ───────────── │    | ─────────────── │
+  │ • BME280 I2C  │    |  • BLE Receiver │
+  │ • Reads Temp  │    |  • Serial Output│
+  │ • BLE TX      │--->|  • BLE RX       │
+  └───────────────┘    └─────────────────┘
         BLE Link (Wireless)
 ```
 
